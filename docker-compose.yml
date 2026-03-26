@@ -1,0 +1,109 @@
+version: "3.9"
+
+x-app-env: &app-env
+  DATABASE_URL: postgres://postgres:postgres@postgres:5432/ticketbooking
+  REDIS_URL: redis://redis:6379
+  PAYMENT_SERVICE_URL: http://payment:4000
+  BOOKING_SERVICE_URL: http://api:3000
+  PAYMENT_WEBHOOK_SECRET: dev-webhook-secret
+  LOCK_TTL_SECONDS: 1920
+  BOOKING_WINDOW_MINUTES: 30
+  NODE_ENV: development
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ticketbooking
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    build: .
+    command: node src/scripts/migrate.js
+    environment:
+      <<: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
+  api:
+    build: .
+    command: node src/app.js
+    environment:
+      <<: *app-env
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  payment:
+    build: .
+    command: node mock-payment/server.js
+    environment:
+      <<: *app-env
+      PAYMENT_PORT: 4000
+    ports:
+      - "4000:4000"
+    restart: unless-stopped
+
+  worker-outbox:
+    build: .
+    command: node src/workers/outboxWorker.js
+    environment:
+      <<: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  worker-jobs:
+    build: .
+    command: node src/jobs/bookingCheckWorker.js
+    environment:
+      <<: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
