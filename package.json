@@ -9,7 +9,8 @@
     "migrate": "node src/scripts/migrate.js",
     "worker:outbox": "node src/workers/outboxWorker.js",
     "worker:jobs": "node src/jobs/bookingCheckWorker.js",
-    "payment-mock": "node mock-payment/server.js"
+    "payment-mock": "node mock-payment/server.js",
+    "load-test": "node load-test/runner.js"
   },
   "dependencies": {
     "bullmq": "^5.0.0",
@@ -20,6 +21,7 @@
     "uuid": "^9.0.0"
   },
   "devDependencies": {
+    "chalk": "^4.1.2",
     "nodemon": "^3.0.0"
   }
 }
