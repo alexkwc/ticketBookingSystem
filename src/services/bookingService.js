@@ -123,12 +123,13 @@ async function confirmBookingSuccess(booking) {
     await client.query("BEGIN");
 
     // Step 7.1: check for a newer booking on the same event+seat
+    // Only a booking created AFTER this one is a real conflict (lock expired, re-booked).
     const { rows: conflicts } = await client.query(
       `SELECT id FROM bookings
-       WHERE event_id = $1 AND seat_id = $2 AND id != $3
-       ORDER BY created_at DESC
+       WHERE event_id = $1 AND seat_id = $2 AND id != $3 AND created_at > $4
+       ORDER BY created_at ASC
        LIMIT 1`,
-      [booking.event_id, booking.seat_id, booking.id]
+      [booking.event_id, booking.seat_id, booking.id, booking.created_at]
     );
 
     if (conflicts.length > 0) {

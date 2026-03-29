@@ -17,7 +17,7 @@ async function enqueueBookingCheck(bookingID, delayMs) {
     { bookingID },
     {
       delay: delayMs,
-      jobId: `booking-check:${bookingID}`, // deduplication
+      jobId: `booking-check-${bookingID}`, // deduplication
       removeOnComplete: true,
       removeOnFail: 1000,
     }
