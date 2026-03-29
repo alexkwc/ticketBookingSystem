@@ -17,6 +17,9 @@ const BOOKING_WEBHOOK_URL = (process.env.BOOKING_SERVICE_URL || "http://localhos
 // In-memory store
 const sessions = new Map(); // sessionID → { bookingID, userID, amount, status, refunded }
 
+// Chaos control state
+let chaosMode = "normal"; // 'normal' | 'down' | 'slow'
+
 // Simulate random payment delays (ms) when auto-completing
 const MIN_DELAY_MS = 1000;
 const MAX_DELAY_MS = 5000;
@@ -70,6 +73,15 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://localhost:${PORT}`);
     const parts = url.pathname.split("/").filter(Boolean); // e.g. ['sessions', ':id', 'refund']
+
+    // Chaos enforcement — skip for /test/chaos/* management routes
+    if (parts[1] !== "chaos") {
+      if (chaosMode === "down") return send(res, 503, { error: "Service unavailable (chaos)" });
+      if (chaosMode === "slow") {
+        const delay = 2000 + Math.random() * 3000;
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
 
     // POST /sessions
     if (req.method === "POST" && parts[0] === "sessions" && parts.length === 1) {
@@ -136,6 +148,21 @@ const server = http.createServer(async (req, res) => {
       }, randomDelay());
 
       return send(res, 202, { message: "Payment will fail shortly" });
+    }
+
+    // POST /test/chaos/down | /test/chaos/slow | /test/chaos/reset
+    if (req.method === "POST" && parts[0] === "test" && parts[1] === "chaos") {
+      const mode = parts[2];
+      if (["down", "slow", "reset"].includes(mode)) {
+        chaosMode = mode === "reset" ? "normal" : mode;
+        console.log(`Chaos mode set to: ${chaosMode}`);
+        return send(res, 200, { chaosMode });
+      }
+    }
+
+    // GET /test/chaos/status
+    if (req.method === "GET" && parts[0] === "test" && parts[1] === "chaos" && parts[2] === "status") {
+      return send(res, 200, { chaosMode });
     }
 
     send(res, 404, { error: "Not found" });
