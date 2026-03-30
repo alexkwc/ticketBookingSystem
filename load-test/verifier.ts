@@ -1,19 +1,21 @@
-const db = require("./db");
-const config = require("./config");
+import Redis from "ioredis";
+import * as db from "./db";
+import { BOOKING_WINDOW_MINUTES } from "./config";
+import type { Check, CheckResult } from "./reporter";
 
-function pass(detail) {
+function pass(detail: string): CheckResult {
   return { pass: true, detail };
 }
 
-function fail(detail) {
+function fail(detail: string): CheckResult {
   return { pass: false, detail };
 }
 
 /**
  * Invariant 1: No seat should have more than one success booking.
  */
-async function noDoubleBookings(eventID) {
-  const rows = await db.query(
+async function noDoubleBookings(eventID: string): Promise<CheckResult> {
+  const rows = await db.query<{ seat_id: string; cnt: string }>(
     `SELECT seat_id, COUNT(*) AS cnt
      FROM bookings
      WHERE event_id = $1 AND status = 'success'
@@ -22,14 +24,16 @@ async function noDoubleBookings(eventID) {
     [eventID]
   );
   if (rows.length === 0) return pass("No double bookings found");
-  return fail(`Double bookings on ${rows.length} seat(s): ${rows.map((r) => r.seat_id).join(", ")}`);
+  return fail(
+    `Double bookings on ${rows.length} seat(s): ${rows.map((r) => r.seat_id).join(", ")}`
+  );
 }
 
 /**
  * Invariant 2: A specific seat should have exactly 1 success booking.
  */
-async function exactlyOneSuccess(eventID, seatID) {
-  const rows = await db.query(
+async function exactlyOneSuccess(eventID: string, seatID: string): Promise<CheckResult> {
+  const rows = await db.query<{ id: string }>(
     `SELECT id FROM bookings WHERE event_id = $1 AND seat_id = $2 AND status = 'success'`,
     [eventID, seatID]
   );
@@ -40,8 +44,8 @@ async function exactlyOneSuccess(eventID, seatID) {
 /**
  * Invariant 3: No booking should have status='rejected' in DB (it's derived only).
  */
-async function noRejectedInDB(eventID) {
-  const rows = await db.query(
+async function noRejectedInDB(eventID: string): Promise<CheckResult> {
+  const rows = await db.query<{ cnt: string }>(
     `SELECT COUNT(*) AS cnt FROM bookings
      WHERE event_id = $1 AND status NOT IN ('pending', 'success')`,
     [eventID]
@@ -55,10 +59,10 @@ async function noRejectedInDB(eventID) {
  * Invariant 4: All outbox entries for this event's bookings are eventually processed.
  * Polls until processed or times out.
  */
-async function outboxComplete(eventID, timeoutMs = 20000) {
+async function outboxComplete(eventID: string, timeoutMs = 20000): Promise<CheckResult> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const rows = await db.query(
+    const rows = await db.query<{ id: string }>(
       `SELECT id FROM outbox
        WHERE processed_at IS NULL
        AND payload->>'bookingID' IN (
@@ -67,9 +71,9 @@ async function outboxComplete(eventID, timeoutMs = 20000) {
       [eventID]
     );
     if (rows.length === 0) return pass("All outbox entries processed");
-    await new Promise((r) => setTimeout(r, 1000));
+    await new Promise<void>((r) => setTimeout(r, 1000));
   }
-  const remaining = await db.query(
+  const remaining = await db.query<{ id: string }>(
     `SELECT id FROM outbox
      WHERE processed_at IS NULL
      AND payload->>'bookingID' IN (
@@ -84,9 +88,8 @@ async function outboxComplete(eventID, timeoutMs = 20000) {
  * Invariant 5: Every pending booking that lost its seat to a success booking
  * must have a refund entry in the outbox.
  */
-async function refundCompleteness(eventID) {
-  // Find pending bookings that should have triggered a refund
-  const displaced = await db.query(
+async function refundCompleteness(eventID: string): Promise<CheckResult> {
+  const displaced = await db.query<{ id: string; payment_session_id: string }>(
     `SELECT b.id, b.payment_session_id FROM bookings b
      WHERE b.event_id = $1
        AND b.status = 'pending'
@@ -103,9 +106,9 @@ async function refundCompleteness(eventID) {
 
   if (displaced.length === 0) return pass("No displaced bookings requiring refunds");
 
-  const missing = [];
+  const missing: string[] = [];
   for (const booking of displaced) {
-    const outboxEntry = await db.queryOne(
+    const outboxEntry = await db.queryOne<{ id: string }>(
       `SELECT id FROM outbox WHERE payload->>'bookingID' = $1 AND type = 'refund'`,
       [booking.id]
     );
@@ -114,22 +117,28 @@ async function refundCompleteness(eventID) {
 
   if (missing.length === 0)
     return pass(`All ${displaced.length} displaced booking(s) have outbox refund entries`);
-  return fail(`${missing.length}/${displaced.length} displaced booking(s) missing outbox refund entry`);
+  return fail(
+    `${missing.length}/${displaced.length} displaced booking(s) missing outbox refund entry`
+  );
 }
 
 /**
  * Invariant 6: Every pending (non-expired) booking should have a Redis lock.
  */
-async function lockConsistency(redis, eventID, seatIDs) {
-  const pendingRows = await db.query(
+async function lockConsistency(
+  redis: Redis,
+  eventID: string,
+  seatIDs: string[]
+): Promise<CheckResult> {
+  const pendingRows = await db.query<{ seat_id: string }>(
     `SELECT seat_id FROM bookings
      WHERE event_id = $1
        AND status = 'pending'
        AND created_at + ($2 || ' minutes')::interval > now()`,
-    [eventID, config.BOOKING_WINDOW_MINUTES]
+    [eventID, BOOKING_WINDOW_MINUTES]
   );
 
-  const inconsistencies = [];
+  const inconsistencies: string[] = [];
   for (const row of pendingRows) {
     const lockKey = `lock:${eventID}:${row.seat_id}`;
     const exists = await redis.exists(lockKey);
@@ -143,18 +152,37 @@ async function lockConsistency(redis, eventID, seatIDs) {
   );
 }
 
+interface RunAllParams {
+  eventID: string;
+  seatIDs?: string[];
+  checkSeatID?: string | null;
+}
+
+interface RunAllResult {
+  passed: number;
+  failed: number;
+  checks: Check[];
+}
+
 /**
  * Run all applicable invariant checks and return a summary.
  */
-async function runAll(redis, { eventID, seatIDs = [], checkSeatID = null }) {
-  const checks = [];
+async function runAll(redis: Redis, params: RunAllParams): Promise<RunAllResult> {
+  const { eventID, seatIDs = [], checkSeatID = null } = params;
+  const checks: Check[] = [];
 
   checks.push({ name: "No double bookings", result: await noDoubleBookings(eventID) });
   checks.push({ name: "No rejected status in DB", result: await noRejectedInDB(eventID) });
-  checks.push({ name: "Lock consistency", result: await lockConsistency(redis, eventID, seatIDs) });
+  checks.push({
+    name: "Lock consistency",
+    result: await lockConsistency(redis, eventID, seatIDs),
+  });
 
   if (checkSeatID) {
-    checks.push({ name: "Exactly one success", result: await exactlyOneSuccess(eventID, checkSeatID) });
+    checks.push({
+      name: "Exactly one success",
+      result: await exactlyOneSuccess(eventID, checkSeatID),
+    });
   }
 
   const passed = checks.filter((c) => c.result.pass).length;
@@ -163,7 +191,7 @@ async function runAll(redis, { eventID, seatIDs = [], checkSeatID = null }) {
   return { passed, failed, checks };
 }
 
-module.exports = {
+export {
   noDoubleBookings,
   exactlyOneSuccess,
   noRejectedInDB,

@@ -1,21 +1,19 @@
-require("dotenv").config();
-const { Worker } = require("bullmq");
-const { Redis } = require("ioredis");
-const { pool } = require("../config/db");
-const { getPaymentStatus } = require("../services/paymentClient");
-const { confirmBookingSuccess } = require("../services/bookingService");
+import "dotenv/config";
+import { Worker, Job } from "bullmq";
+import Redis from "ioredis";
+import { pool } from "../config/db";
+import { getPaymentStatus } from "../services/paymentClient";
+import { confirmBookingSuccess } from "../services/bookingService";
+import type { Booking } from "../types";
 
-const connection = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: null });
+const connection = new Redis(process.env.REDIS_URL as string, { maxRetriesPerRequest: null });
 
-const worker = new Worker(
+const worker = new Worker<{ bookingID: string }>(
   "booking-check",
-  async (job) => {
+  async (job: Job<{ bookingID: string }>) => {
     const { bookingID } = job.data;
 
-    const { rows } = await pool.query(
-      `SELECT * FROM bookings WHERE id = $1`,
-      [bookingID]
-    );
+    const { rows } = await pool.query<Booking>(`SELECT * FROM bookings WHERE id = $1`, [bookingID]);
 
     if (!rows.length) return; // booking deleted
     const booking = rows[0];
@@ -43,7 +41,7 @@ const worker = new Worker(
   { connection, concurrency: 5 }
 );
 
-worker.on("failed", (job, err) => {
+worker.on("failed", (job: Job | undefined, err: Error) => {
   console.error(`booking-check job ${job?.id} failed:`, err.message);
 });
 

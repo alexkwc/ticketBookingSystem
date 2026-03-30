@@ -47,7 +47,7 @@ services:
 
   migrate:
     build: .
-    command: node src/scripts/migrate.js
+    command: node dist/src/scripts/migrate.js
     environment:
       <<: *app-env
     depends_on:
@@ -57,7 +57,7 @@ services:
 
   api:
     build: .
-    command: node src/app.js
+    command: node dist/src/app.js
     environment:
       <<: *app-env
       PORT: 3000
@@ -83,7 +83,7 @@ services:
 
   payment:
     build: .
-    command: node mock-payment/server.js
+    command: node dist/mock-payment/server.js
     environment:
       <<: *app-env
       PAYMENT_PORT: 4000
@@ -93,7 +93,7 @@ services:
 
   worker-outbox:
     build: .
-    command: node src/workers/outboxWorker.js
+    command: node dist/src/workers/outboxWorker.js
     environment:
       <<: *app-env
     depends_on:
@@ -107,7 +107,7 @@ services:
 
   worker-jobs:
     build: .
-    command: node src/jobs/bookingCheckWorker.js
+    command: node dist/src/jobs/bookingCheckWorker.js
     environment:
       <<: *app-env
     depends_on:
@@ -122,7 +122,7 @@ services:
   load-test:
     profiles: ["load-test"]
     build: .
-    command: node load-test/runner.js
+    command: node dist/load-test/runner.js
     environment:
       <<: *load-test-env
       BOOKING_WINDOW_MINUTES: 2

@@ -1,17 +1,28 @@
-require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
+import "dotenv/config";
+import * as config from "./config";
+import * as db from "./db";
+import * as fixtures from "./fixtures";
+import * as reporter from "./reporter";
+import type { ScenarioResult } from "./reporter";
 
-const config = require("./config");
-const db = require("./db");
-const fixtures = require("./fixtures");
-const reporter = require("./reporter");
+import * as baseline from "./scenarios/baseline";
+import * as contention from "./scenarios/contention";
+import * as paymentChaos from "./scenarios/payment-chaos";
+import * as webhookIdempotency from "./scenarios/webhook-idempotency";
+import * as chaosMix from "./scenarios/chaos-mix";
 
-const baseline = require("./scenarios/baseline");
-const contention = require("./scenarios/contention");
-const paymentChaos = require("./scenarios/payment-chaos");
-const webhookIdempotency = require("./scenarios/webhook-idempotency");
-const chaosMix = require("./scenarios/chaos-mix");
+import type Redis from "ioredis";
 
-const SCENARIOS = [
+interface ScenarioModule {
+  run: (redis: Redis) => Promise<{ eventID: string; passed: boolean }>;
+}
+
+interface Scenario {
+  name: string;
+  module: ScenarioModule;
+}
+
+const SCENARIOS: Scenario[] = [
   { name: "Baseline", module: baseline },
   { name: "Seat Contention", module: contention },
   { name: "Payment Chaos", module: paymentChaos },
@@ -19,7 +30,7 @@ const SCENARIOS = [
   { name: "Chaos Mix", module: chaosMix },
 ];
 
-async function main() {
+async function main(): Promise<void> {
   console.log("\n══════════════════════════════════════");
   console.log("  TICKET BOOKING SYSTEM — LOAD TEST");
   console.log("══════════════════════════════════════");
@@ -35,11 +46,11 @@ async function main() {
   console.log("  Setting up fixtures...");
   await fixtures.setup();
 
-  const allResults = [];
+  const allResults: ScenarioResult[] = [];
 
   for (const { name, module } of SCENARIOS) {
     const start = Date.now();
-    let scenarioResult;
+    let scenarioResult: { eventID: string; passed: boolean } | undefined;
     try {
       scenarioResult = await module.run(redis);
       allResults.push({
@@ -48,10 +59,14 @@ async function main() {
         durationMs: Date.now() - start,
       });
     } catch (err) {
-      reporter.reportError(name, err);
-      allResults.push({ name, passed: false, error: err.message, durationMs: Date.now() - start });
-      // Attempt cleanup even on error
-      if (scenarioResult && scenarioResult.eventID) {
+      reporter.reportError(name, err as Error);
+      allResults.push({
+        name,
+        passed: false,
+        error: (err as Error).message,
+        durationMs: Date.now() - start,
+      });
+      if (scenarioResult?.eventID) {
         await fixtures.cleanupScenario(scenarioResult.eventID).catch(() => {});
       }
       continue;
@@ -59,9 +74,9 @@ async function main() {
 
     // Cleanup scenario data
     if (scenarioResult.eventID) {
-      await fixtures.cleanupScenario(scenarioResult.eventID).catch((err) =>
-        console.error(`  Cleanup error for ${name}:`, err.message)
-      );
+      await fixtures
+        .cleanupScenario(scenarioResult.eventID)
+        .catch((err: Error) => console.error(`  Cleanup error for ${name}:`, err.message));
     }
   }
 
@@ -75,7 +90,7 @@ async function main() {
   process.exit(allPassed ? 0 : 1);
 }
 
-main().catch((err) => {
+main().catch((err: Error) => {
   console.error("Fatal error:", err);
   process.exit(1);
 });

@@ -5,26 +5,29 @@
  * Chaos reset. Wave 1 payments complete.
  * Verifies: wave 1 seats have success bookings, wave 2 seats have none.
  */
-const { v4: uuidv4 } = require("uuid");
-const fixtures = require("../fixtures");
-const gen = require("../load-generator");
-const verifier = require("../verifier");
-const chaos = require("../chaos");
-const http = require("../http");
-const config = require("../config");
-const reporter = require("../reporter");
+import { v4 as uuidv4 } from "uuid";
+import type Redis from "ioredis";
+import * as fixtures from "../fixtures";
+import * as gen from "../load-generator";
+import * as verifier from "../verifier";
+import * as chaos from "../chaos";
+import * as http from "../http";
+import { API_URL, PAYMENT_URL } from "../config";
+import * as reporter from "../reporter";
+import type { BookingRequest } from "../load-generator";
+import type { Check } from "../reporter";
 
 const WAVE_SIZE = 10;
 
-async function run(redis) {
+async function run(redis: Redis): Promise<{ eventID: string; passed: boolean }> {
   const { eventID, seatIDs } = await fixtures.createScenarioData(WAVE_SIZE * 2, "payment-chaos");
   const wave1Seats = seatIDs.slice(0, WAVE_SIZE);
   const wave2Seats = seatIDs.slice(WAVE_SIZE);
 
   // Wave 1 — payment service up
-  const wave1Requests = wave1Seats.map((seatID, i) => ({
+  const wave1Requests: BookingRequest[] = wave1Seats.map((seatID, i) => ({
     id: `w1-${i}`,
-    url: `${config.API_URL}/bookings`,
+    url: `${API_URL}/bookings`,
     headers: { "x-user-id": uuidv4(), "content-type": "application/json" },
     body: { eventID, seatID },
   }));
@@ -34,9 +37,9 @@ async function run(redis) {
   await chaos.setChaosMode("down");
 
   // Wave 2 — payment service down
-  const wave2Requests = wave2Seats.map((seatID, i) => ({
+  const wave2Requests: BookingRequest[] = wave2Seats.map((seatID, i) => ({
     id: `w2-${i}`,
-    url: `${config.API_URL}/bookings`,
+    url: `${API_URL}/bookings`,
     headers: { "x-user-id": uuidv4(), "content-type": "application/json" },
     body: { eventID, seatID },
   }));
@@ -47,15 +50,15 @@ async function run(redis) {
 
   // Complete wave 1 payments
   for (const r of wave1Results.filter((r) => r.status === 201)) {
-    const sessionID = gen.extractSessionID(r.body.checkoutURL);
+    const sessionID = gen.extractSessionID((r.body as { checkoutURL?: string }).checkoutURL);
     if (sessionID) {
-      await http.post(`${config.PAYMENT_URL}/test/complete/${sessionID}`);
+      await http.post(`${PAYMENT_URL}/test/complete/${sessionID}`);
     }
   }
   await gen.waitMs(5000);
 
   const core = await verifier.runAll(redis, { eventID, seatIDs });
-  const checks = [...core.checks];
+  const checks: Check[] = [...core.checks];
 
   const wave1Got201 = wave1Results.filter((r) => r.status === 201).length;
   const wave2Got503 = wave2Results.filter((r) => r.status === 503).length;
@@ -72,14 +75,20 @@ async function run(redis) {
     result:
       wave2Got503 === WAVE_SIZE
         ? { pass: true, detail: `${wave2Got503}/${WAVE_SIZE} got 503` }
-        : { pass: false, detail: `${wave2Got503}/${WAVE_SIZE} got 503 (rest: ${WAVE_SIZE - wave2Got503} other)` },
+        : {
+            pass: false,
+            detail: `${wave2Got503}/${WAVE_SIZE} got 503 (rest: ${WAVE_SIZE - wave2Got503} other)`,
+          },
   });
 
-  reporter.reportScenario("Payment Chaos — wave1 up / wave2 down", [...wave1Results, ...wave2Results]);
+  reporter.reportScenario(
+    "Payment Chaos — wave1 up / wave2 down",
+    [...wave1Results, ...wave2Results]
+  );
   reporter.reportVerification(checks);
 
   const passed = checks.every((c) => c.result.pass);
-  return { eventID, passed, checks };
+  return { eventID, passed };
 }
 
-module.exports = { run };
+export { run };

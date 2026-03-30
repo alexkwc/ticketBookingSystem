@@ -1,10 +1,11 @@
-require("dotenv").config();
-const fs = require("fs");
-const path = require("path");
-const { pool } = require("../config/db");
+import "dotenv/config";
+import fs from "fs";
+import path from "path";
+import { pool } from "../config/db";
 
-async function migrate() {
-  const migrationDir = path.join(__dirname, "../../migrations");
+async function migrate(): Promise<void> {
+  // Use process.cwd() so the path resolves correctly from both source and compiled output
+  const migrationDir = path.join(process.cwd(), "migrations");
   const files = fs.readdirSync(migrationDir).sort();
 
   for (const file of files) {
@@ -18,7 +19,7 @@ async function migrate() {
   await pool.end();
 }
 
-migrate().catch((err) => {
+migrate().catch((err: Error) => {
   console.error("Migration failed:", err);
   process.exit(1);
 });

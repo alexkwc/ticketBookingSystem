@@ -5,28 +5,31 @@
  * Exactly 3 bookings should succeed (one per seat).
  * All displaced bookings that paid must get outbox refund entries.
  */
-const { v4: uuidv4 } = require("uuid");
-const fixtures = require("../fixtures");
-const gen = require("../load-generator");
-const verifier = require("../verifier");
-const chaos = require("../chaos");
-const http = require("../http");
-const config = require("../config");
-const reporter = require("../reporter");
+import { v4 as uuidv4 } from "uuid";
+import type Redis from "ioredis";
+import * as fixtures from "../fixtures";
+import * as gen from "../load-generator";
+import * as verifier from "../verifier";
+import * as chaos from "../chaos";
+import * as http from "../http";
+import { API_URL, PAYMENT_URL } from "../config";
+import * as reporter from "../reporter";
+import type { BookingRequest } from "../load-generator";
+import type { Check } from "../reporter";
 
 const SEATS = 3;
 const USERS_PER_SEAT = 5;
 
-async function run(redis) {
+async function run(redis: Redis): Promise<{ eventID: string; passed: boolean }> {
   const { eventID, seatIDs } = await fixtures.createScenarioData(SEATS, "chaos-mix");
 
   // Build 15 requests: 5 per seat
-  const allRequests = [];
+  const allRequests: BookingRequest[] = [];
   for (const seatID of seatIDs) {
     for (let i = 0; i < USERS_PER_SEAT; i++) {
       allRequests.push({
         id: `${seatID}-${i}`,
-        url: `${config.API_URL}/bookings`,
+        url: `${API_URL}/bookings`,
         headers: { "x-user-id": uuidv4(), "content-type": "application/json" },
         body: { eventID, seatID },
       });
@@ -40,9 +43,9 @@ async function run(redis) {
 
   // Complete payment for all winners (201 responses)
   for (const r of results.filter((r) => r.status === 201)) {
-    const sessionID = gen.extractSessionID(r.body.checkoutURL);
+    const sessionID = gen.extractSessionID((r.body as { checkoutURL?: string }).checkoutURL);
     if (sessionID) {
-      await http.post(`${config.PAYMENT_URL}/test/complete/${sessionID}`);
+      await http.post(`${PAYMENT_URL}/test/complete/${sessionID}`);
     }
   }
 
@@ -53,9 +56,13 @@ async function run(redis) {
   const outbox = await verifier.outboxComplete(eventID, 5000); // should already be done
   const refunds = await verifier.refundCompleteness(eventID);
 
-  const checks = [...core.checks, { name: "Outbox complete", result: outbox }, { name: "Refund completeness", result: refunds }];
+  const checks: Check[] = [
+    ...core.checks,
+    { name: "Outbox complete", result: outbox },
+    { name: "Refund completeness", result: refunds },
+  ];
 
-  // Verify exactly 3 success bookings (one per seat)
+  // Verify exactly 1 success booking per seat
   for (const seatID of seatIDs) {
     const check = await verifier.exactlyOneSuccess(eventID, seatID);
     checks.push({ name: `Exactly 1 winner for seat ${seatID.slice(0, 8)}…`, result: check });
@@ -75,14 +82,20 @@ async function run(redis) {
     result:
       got409 === SEATS * USERS_PER_SEAT - SEATS
         ? { pass: true, detail: `${got409} conflicts` }
-        : { pass: false, detail: `Got ${got409} conflicts, expected ${SEATS * USERS_PER_SEAT - SEATS}` },
+        : {
+            pass: false,
+            detail: `Got ${got409} conflicts, expected ${SEATS * USERS_PER_SEAT - SEATS}`,
+          },
   });
 
-  reporter.reportScenario(`Chaos Mix — ${SEATS} seats × ${USERS_PER_SEAT} users (slow chaos)`, results);
+  reporter.reportScenario(
+    `Chaos Mix — ${SEATS} seats × ${USERS_PER_SEAT} users (slow chaos)`,
+    results
+  );
   reporter.reportVerification(checks);
 
   const passed = checks.every((c) => c.result.pass);
-  return { eventID, passed, checks };
+  return { eventID, passed };
 }
 
-module.exports = { run };
+export { run };

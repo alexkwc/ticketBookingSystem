@@ -1,9 +1,8 @@
-const { Queue } = require("bullmq");
-const { redis } = require("../config/redis");
+import { Queue } from "bullmq";
+import Redis from "ioredis";
 
 // BullMQ requires a dedicated connection (no shared subscriber)
-const { Redis } = require("ioredis");
-const connection = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: null });
+const connection = new Redis(process.env.REDIS_URL as string, { maxRetriesPerRequest: null });
 
 const bookingCheckQueue = new Queue("booking-check", { connection });
 
@@ -11,7 +10,7 @@ const bookingCheckQueue = new Queue("booking-check", { connection });
  * Enqueue a job that fires after `delayMs` milliseconds.
  * The job will poll the payment service and confirm/reject the booking.
  */
-async function enqueueBookingCheck(bookingID, delayMs) {
+async function enqueueBookingCheck(bookingID: string, delayMs: number): Promise<void> {
   await bookingCheckQueue.add(
     "check",
     { bookingID },
@@ -24,4 +23,4 @@ async function enqueueBookingCheck(bookingID, delayMs) {
   );
 }
 
-module.exports = { bookingCheckQueue, enqueueBookingCheck };
+export { bookingCheckQueue, enqueueBookingCheck };

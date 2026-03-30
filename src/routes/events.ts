@@ -1,16 +1,16 @@
-const { Router } = require("express");
-const { pool } = require("../config/db");
+import { Router, Request, Response, NextFunction } from "express";
+import { pool } from "../config/db";
 
 const router = Router();
 
 // GET /events?cursor=<created_at>&limit=20&date=&host=
-router.get("/", async (req, res, next) => {
+router.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
-    const { cursor, date, host } = req.query;
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+    const { cursor, date, host } = req.query as Record<string, string | undefined>;
 
-    const params = [];
-    const conditions = [];
+    const params: unknown[] = [];
+    const conditions: string[] = [];
 
     if (date) {
       params.push(date);
@@ -46,10 +46,10 @@ router.get("/", async (req, res, next) => {
 });
 
 // GET /events/:id — event detail with seat availability
-router.get("/:id", async (req, res, next) => {
+router.get("/:id", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const BOOKING_WINDOW = parseInt(process.env.BOOKING_WINDOW_MINUTES || 30);
+    const BOOKING_WINDOW = parseInt(process.env.BOOKING_WINDOW_MINUTES ?? "30");
 
     const { rows: events } = await pool.query(
       `SELECT e.id, e.name, e.host, e.date, v.id AS venue_id, v.name AS venue_name, v.address
@@ -88,4 +88,4 @@ router.get("/:id", async (req, res, next) => {
   }
 });
 
-module.exports = router;
+export default router;

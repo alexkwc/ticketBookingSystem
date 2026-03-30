@@ -1,6 +1,24 @@
-const chalk = require("chalk");
+import chalk from "chalk";
+import type { BookingResult } from "./load-generator";
 
-function reportScenario(name, httpResults) {
+export interface CheckResult {
+  pass: boolean;
+  detail: string;
+}
+
+export interface Check {
+  name: string;
+  result: CheckResult;
+}
+
+export interface ScenarioResult {
+  name: string;
+  passed: boolean;
+  durationMs?: number;
+  error?: string;
+}
+
+function reportScenario(name: string, httpResults: BookingResult[]): void {
   const total = httpResults.length;
   const by201 = httpResults.filter((r) => r.status === 201).length;
   const by409 = httpResults.filter((r) => r.status === 409).length;
@@ -10,7 +28,9 @@ function reportScenario(name, httpResults) {
 
   const durations = httpResults.filter((r) => r.durationMs).map((r) => r.durationMs);
   const maxMs = durations.length ? Math.max(...durations) : 0;
-  const avgMs = durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : 0;
+  const avgMs = durations.length
+    ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
+    : 0;
 
   console.log(chalk.bold(`\n── ${name} ──`));
   console.log(`   Requests : ${total}`);
@@ -22,7 +42,7 @@ function reportScenario(name, httpResults) {
   console.log(`   Latency  : avg ${avgMs}ms / max ${maxMs}ms`);
 }
 
-function reportVerification(checks) {
+function reportVerification(checks: Check[]): void {
   console.log(chalk.bold("   Invariants:"));
   for (const { name, result } of checks) {
     const icon = result.pass ? chalk.green("✔") : chalk.red("✗");
@@ -34,13 +54,13 @@ function reportVerification(checks) {
   }
 }
 
-function reportError(name, err) {
+function reportError(name: string, err: Error): void {
   console.log(chalk.bold.red(`\n── ${name} — ERROR ──`));
   console.log(chalk.red(`   ${err.message}`));
   if (err.stack) console.log(chalk.dim(err.stack.split("\n").slice(1).join("\n")));
 }
 
-function reportSummary(allResults) {
+function reportSummary(allResults: ScenarioResult[]): void {
   console.log(chalk.bold("\n══════════════════════════════════════"));
   console.log(chalk.bold("  LOAD TEST SUMMARY"));
   console.log(chalk.bold("══════════════════════════════════════"));
@@ -70,4 +90,4 @@ function reportSummary(allResults) {
   console.log(chalk.bold("══════════════════════════════════════\n"));
 }
 
-module.exports = { reportScenario, reportVerification, reportError, reportSummary };
+export { reportScenario, reportVerification, reportError, reportSummary };
