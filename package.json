@@ -11,7 +11,9 @@
     "worker:outbox": "node dist/src/workers/outboxWorker.js",
     "worker:jobs": "node dist/src/jobs/bookingCheckWorker.js",
     "payment-mock": "node dist/mock-payment/server.js",
-    "load-test": "node dist/load-test/runner.js"
+    "load-test": "node dist/load-test/runner.js",
+    "test": "jest",
+    "test:watch": "jest --watch"
   },
   "dependencies": {
     "bullmq": "^5.0.0",
@@ -23,12 +25,22 @@
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.14",
     "@types/node": "^20.0.0",
     "@types/pg": "^8.11.0",
     "@types/uuid": "^9.0.0",
     "chalk": "^4.1.2",
+    "jest": "^29.7.0",
     "nodemon": "^3.0.0",
+    "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.0"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/__tests__/**/*.test.ts"
+    ]
   }
 }
