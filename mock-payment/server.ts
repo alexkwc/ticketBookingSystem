@@ -26,9 +26,9 @@ interface Session {
 // In-memory store
 const sessions = new Map<string, Session>();
 
-// Chaos control state
-type ChaosMode = "normal" | "down" | "slow";
-let chaosMode: ChaosMode = "normal";
+// Fault injection control state
+type FaultMode = "normal" | "down" | "slow";
+let faultMode: FaultMode = "normal";
 
 // Simulate random payment delays (ms) when auto-completing
 const MIN_DELAY_MS = 1000;
@@ -88,10 +88,10 @@ const server = http.createServer(
       const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
       const parts = url.pathname.split("/").filter(Boolean);
 
-      // Chaos enforcement — skip for /test/chaos/* management routes
-      if (parts[1] !== "chaos") {
-        if (chaosMode === "down") return send(res, 503, { error: "Service unavailable (chaos)" });
-        if (chaosMode === "slow") {
+      // Fault injection enforcement — skip for /test/fault/* management routes
+      if (parts[1] !== "fault") {
+        if (faultMode === "down") return send(res, 503, { error: "Service unavailable (fault injection)" });
+        if (faultMode === "slow") {
           const delay = 2000 + Math.random() * 3000;
           await new Promise<void>((r) => setTimeout(r, delay));
         }
@@ -164,24 +164,24 @@ const server = http.createServer(
         return send(res, 202, { message: "Payment will fail shortly" });
       }
 
-      // POST /test/chaos/down | /test/chaos/slow | /test/chaos/reset
-      if (req.method === "POST" && parts[0] === "test" && parts[1] === "chaos") {
+      // POST /test/fault/down | /test/fault/slow | /test/fault/reset
+      if (req.method === "POST" && parts[0] === "test" && parts[1] === "fault") {
         const mode = parts[2];
         if (["down", "slow", "reset"].includes(mode)) {
-          chaosMode = mode === "reset" ? "normal" : (mode as ChaosMode);
-          console.log(`Chaos mode set to: ${chaosMode}`);
-          return send(res, 200, { chaosMode });
+          faultMode = mode === "reset" ? "normal" : (mode as FaultMode);
+          console.log(`Fault mode set to: ${faultMode}`);
+          return send(res, 200, { faultMode });
         }
       }
 
-      // GET /test/chaos/status
+      // GET /test/fault/status
       if (
         req.method === "GET" &&
         parts[0] === "test" &&
-        parts[1] === "chaos" &&
+        parts[1] === "fault" &&
         parts[2] === "status"
       ) {
-        return send(res, 200, { chaosMode });
+        return send(res, 200, { faultMode });
       }
 
       send(res, 404, { error: "Not found" });

@@ -7,9 +7,9 @@ import type { ScenarioResult } from "./reporter";
 
 import * as baseline from "./scenarios/baseline";
 import * as contention from "./scenarios/contention";
-import * as paymentChaos from "./scenarios/payment-chaos";
+import * as paymentFailure from "./scenarios/payment-failure";
 import * as webhookIdempotency from "./scenarios/webhook-idempotency";
-import * as chaosMix from "./scenarios/chaos-mix";
+import * as faultMix from "./scenarios/fault-mix";
 
 import type Redis from "ioredis";
 
@@ -25,14 +25,14 @@ interface Scenario {
 const SCENARIOS: Scenario[] = [
   { name: "Baseline", module: baseline },
   { name: "Seat Contention", module: contention },
-  { name: "Payment Chaos", module: paymentChaos },
+  { name: "Payment Failure", module: paymentFailure },
   { name: "Webhook Idempotency", module: webhookIdempotency },
-  { name: "Chaos Mix", module: chaosMix },
+  { name: "Fault Mix", module: faultMix },
 ];
 
 async function main(): Promise<void> {
   console.log("\n══════════════════════════════════════");
-  console.log("  TICKET BOOKING SYSTEM — LOAD TEST");
+  console.log("  TICKET BOOKING SYSTEM — INTEGRATION TESTS");
   console.log("══════════════════════════════════════");
   console.log(`  API     : ${config.API_URL}`);
   console.log(`  Payment : ${config.PAYMENT_URL}`);

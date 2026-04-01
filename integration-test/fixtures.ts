@@ -4,7 +4,7 @@ import * as db from "./db";
 async function setup(): Promise<void> {
   // Clean up any orphaned test data from interrupted previous runs
   const rows = await db.query<{ id: string; venue_id: string }>(
-    `SELECT id, venue_id FROM events WHERE name LIKE 'load-test-%'`
+    `SELECT id, venue_id FROM events WHERE name LIKE 'integration-test-%'`
   );
   for (const row of rows) {
     await cleanupScenario(row.id);
@@ -20,7 +20,7 @@ async function createScenarioData(
 
   await db.query(`INSERT INTO venues (id, name, address) VALUES ($1, $2, $3)`, [
     venueID,
-    `load-test-venue-${uuidv4()}`,
+    `integration-test-venue-${uuidv4()}`,
     "Test Address",
   ]);
 
@@ -29,7 +29,7 @@ async function createScenarioData(
 
   await db.query(
     `INSERT INTO events (id, name, host, date, venue_id) VALUES ($1, $2, $3, $4, $5)`,
-    [eventID, `load-test-${label}-${uuidv4()}`, "load-test", tomorrow, venueID]
+    [eventID, `integration-test-${label}-${uuidv4()}`, "load-test", tomorrow, venueID]
   );
 
   const seatIDs: string[] = [];

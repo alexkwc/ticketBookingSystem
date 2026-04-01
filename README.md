@@ -127,22 +127,22 @@ npm test
 | `paymentClient` | Session creation, refund, 503 handling |
 | `bookingService` | `deriveStatus`, idempotent webhook, atomic confirmation, outbox refund path |
 
-## Load Test + Chaos Monkey
+## Concurrency Integration Tests
 
-The load test suite verifies correctness invariants under concurrent load and injected failures.
+An end-to-end integration test suite that verifies correctness invariants under concurrent load and injected failures. These are correctness tests, not performance benchmarks.
 
 ```bash
-# Start app + run load test in one command
-docker compose --profile load-test up --build
+# Start app + run integration tests in one command
+docker compose --profile integration-test up --build
 
-# App already running — run test once
-docker compose --profile load-test run --rm load-test
+# App already running — run tests once
+docker compose --profile integration-test run --rm integration-test
 
 # Run directly against a locally running app
-npm run load-test
+npm run integration-test
 ```
 
-The load-test container exits `0` (all pass) or `1` (any failure).
+The integration-test container exits `0` (all pass) or `1` (any failure).
 
 ### Scenarios
 
@@ -150,9 +150,9 @@ The load-test container exits `0` (all pass) or `1` (any failure).
 |---|---|---|
 | **Baseline** | 50 users book 50 different seats concurrently | All 50 return 201, no double bookings |
 | **Seat Contention** | 30 users race for 1 seat | Exactly 1 wins (201), 29 get 409 |
-| **Payment Chaos** | Wave 1 succeeds; chaos `down`; wave 2 fires | Wave 2 all get 503; wave 1 confirmed |
+| **Payment Failure** | Wave 1 succeeds; fault `down`; wave 2 fires | Wave 2 all get 503; wave 1 confirmed |
 | **Webhook Idempotency** | Webhook fires + 2 manual duplicates sent | Duplicates return 200; exactly 1 success row |
-| **Chaos Mix** | 5 users × 3 seats, payment `slow` | 3 winners, refunds in outbox, all processed |
+| **Fault Mix** | 5 users × 3 seats, payment `slow` | 3 winners, refunds in outbox, all processed |
 
 ### Correctness Invariants
 
@@ -162,16 +162,16 @@ The load-test container exits `0` (all pass) or `1` (any failure).
 - All displaced bookings have an outbox refund entry
 - All outbox entries are eventually processed
 
-### Chaos Modes
+### Fault Injection Modes
 
-The mock payment service exposes chaos control endpoints used by the test runner:
+The mock payment service exposes fault injection endpoints used by the test runner:
 
 | Endpoint | Effect |
 |---|---|
-| `POST /test/chaos/down` | All payment endpoints return 503 |
-| `POST /test/chaos/slow` | All payment endpoints add 2–5s random delay |
-| `POST /test/chaos/reset` | Restore normal operation |
-| `GET /test/chaos/status` | Query current chaos mode |
+| `POST /test/fault/down` | All payment endpoints return 503 |
+| `POST /test/fault/slow` | All payment endpoints add 2–5s random delay |
+| `POST /test/fault/reset` | Restore normal operation |
+| `GET /test/fault/status` | Query current fault mode |
 
 ## Environment Variables
 
@@ -184,4 +184,4 @@ The mock payment service exposes chaos control endpoints used by the test runner
 | `LOCK_TTL_SECONDS` | `1920` | Redis lock TTL (32 min = 30 min window + 2 min buffer) |
 | `PORT` | `3000` | API server port |
 
-> The load-test container sets `BOOKING_WINDOW_MINUTES=2` so expiry scenarios don't need to wait 30 minutes.
+> The integration-test container sets `BOOKING_WINDOW_MINUTES=2` so expiry scenarios don't need to wait 30 minutes.

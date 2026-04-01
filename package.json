@@ -11,7 +11,7 @@
     "worker:outbox": "node dist/src/workers/outboxWorker.js",
     "worker:jobs": "node dist/src/jobs/bookingCheckWorker.js",
     "payment-mock": "node dist/mock-payment/server.js",
-    "load-test": "node dist/load-test/runner.js",
+    "integration-test": "node dist/integration-test/runner.js",
     "test": "jest",
     "test:watch": "jest --watch"
   },

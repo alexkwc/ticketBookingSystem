@@ -1,8 +1,8 @@
 /**
  * Scenario: Graceful degradation under payment service failure
  * Wave 1 (10 bookings) fires while payment is up — all succeed.
- * Chaos enabled. Wave 2 (10 bookings) fires — payment service is down, all get 503.
- * Chaos reset. Wave 1 payments complete.
+ * Fault injection: service down. Wave 2 (10 bookings) fires — payment service is down, all get 503.
+ * Fault reset. Wave 1 payments complete.
  * Verifies: wave 1 seats have success bookings, wave 2 seats have none.
  */
 import { v4 as uuidv4 } from "uuid";
@@ -10,7 +10,7 @@ import type Redis from "ioredis";
 import * as fixtures from "../fixtures";
 import * as gen from "../load-generator";
 import * as verifier from "../verifier";
-import * as chaos from "../chaos";
+import * as faultInjection from "../fault-injection";
 import * as http from "../http";
 import { API_URL, PAYMENT_URL } from "../config";
 import * as reporter from "../reporter";
@@ -20,7 +20,7 @@ import type { Check } from "../reporter";
 const WAVE_SIZE = 10;
 
 async function run(redis: Redis): Promise<{ eventID: string; passed: boolean }> {
-  const { eventID, seatIDs } = await fixtures.createScenarioData(WAVE_SIZE * 2, "payment-chaos");
+  const { eventID, seatIDs } = await fixtures.createScenarioData(WAVE_SIZE * 2, "payment-failure");
   const wave1Seats = seatIDs.slice(0, WAVE_SIZE);
   const wave2Seats = seatIDs.slice(WAVE_SIZE);
 
@@ -34,7 +34,7 @@ async function run(redis: Redis): Promise<{ eventID: string; passed: boolean }> 
   const wave1Results = await gen.runConcurrent(wave1Requests);
 
   // Enable chaos
-  await chaos.setChaosMode("down");
+  await faultInjection.setFaultMode("down");
 
   // Wave 2 — payment service down
   const wave2Requests: BookingRequest[] = wave2Seats.map((seatID, i) => ({
@@ -46,7 +46,7 @@ async function run(redis: Redis): Promise<{ eventID: string; passed: boolean }> 
   const wave2Results = await gen.runConcurrent(wave2Requests);
 
   // Reset chaos
-  await chaos.setChaosMode("reset");
+  await faultInjection.setFaultMode("reset");
 
   // Complete wave 1 payments
   for (const r of wave1Results.filter((r) => r.status === 201)) {
@@ -82,7 +82,7 @@ async function run(redis: Redis): Promise<{ eventID: string; passed: boolean }> 
   });
 
   reporter.reportScenario(
-    "Payment Chaos — wave1 up / wave2 down",
+    "Payment Failure — wave1 up / wave2 down",
     [...wave1Results, ...wave2Results]
   );
   reporter.reportVerification(checks);

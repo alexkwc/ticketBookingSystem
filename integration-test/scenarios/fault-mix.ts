@@ -1,5 +1,5 @@
 /**
- * Scenario: Full chaos mix — slow payment + seat contention
+ * Scenario: Fault mix — slow payment + seat contention
  * 5 users compete for each of 3 seats (15 concurrent requests total).
  * Payment service is slow during the burst, increasing the contention window.
  * Exactly 3 bookings should succeed (one per seat).
@@ -10,7 +10,7 @@ import type Redis from "ioredis";
 import * as fixtures from "../fixtures";
 import * as gen from "../load-generator";
 import * as verifier from "../verifier";
-import * as chaos from "../chaos";
+import * as faultInjection from "../fault-injection";
 import * as http from "../http";
 import { API_URL, PAYMENT_URL } from "../config";
 import * as reporter from "../reporter";
@@ -21,7 +21,7 @@ const SEATS = 3;
 const USERS_PER_SEAT = 5;
 
 async function run(redis: Redis): Promise<{ eventID: string; passed: boolean }> {
-  const { eventID, seatIDs } = await fixtures.createScenarioData(SEATS, "chaos-mix");
+  const { eventID, seatIDs } = await fixtures.createScenarioData(SEATS, "fault-mix");
 
   // Build 15 requests: 5 per seat
   const allRequests: BookingRequest[] = [];
@@ -36,10 +36,10 @@ async function run(redis: Redis): Promise<{ eventID: string; passed: boolean }> 
     }
   }
 
-  // Fire under slow chaos
-  await chaos.setChaosMode("slow");
+  // Fire under slow fault injection
+  await faultInjection.setFaultMode("slow");
   const results = await gen.runConcurrent(allRequests);
-  await chaos.setChaosMode("reset");
+  await faultInjection.setFaultMode("reset");
 
   // Complete payment for all winners (201 responses)
   for (const r of results.filter((r) => r.status === 201)) {
@@ -89,7 +89,7 @@ async function run(redis: Redis): Promise<{ eventID: string; passed: boolean }> 
   });
 
   reporter.reportScenario(
-    `Chaos Mix — ${SEATS} seats × ${USERS_PER_SEAT} users (slow chaos)`,
+    `Chaos Mix — ${SEATS} seats × ${USERS_PER_SEAT} users (slow fault injection)`,
     results
   );
   reporter.reportVerification(checks);

@@ -10,7 +10,7 @@ x-app-env: &app-env
   BOOKING_WINDOW_MINUTES: 30
   NODE_ENV: development
 
-x-load-test-env: &load-test-env
+x-integration-test-env: &integration-test-env
   DATABASE_URL: postgres://postgres:postgres@postgres:5432/ticketbooking
   REDIS_URL: redis://redis:6379
   API_URL: http://api:3000
@@ -119,12 +119,12 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
-  load-test:
-    profiles: ["load-test"]
+  integration-test:
+    profiles: ["integration-test"]
     build: .
-    command: node dist/load-test/runner.js
+    command: node dist/integration-test/runner.js
     environment:
-      <<: *load-test-env
+      <<: *integration-test-env
       BOOKING_WINDOW_MINUTES: 2
     depends_on:
       api:

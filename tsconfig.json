@@ -10,6 +10,6 @@
     "resolveJsonModule": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*", "mock-payment/**/*", "load-test/**/*"],
+  "include": ["src/**/*", "mock-payment/**/*", "integration-test/**/*"],
   "exclude": ["node_modules", "dist", "**/__tests__/**", "**/*.test.ts"]
 }
