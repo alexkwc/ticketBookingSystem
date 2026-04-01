@@ -1,25 +1,80 @@
 # Ticket Booking System
 
-A distributed ticket booking system demonstrating production-grade patterns for handling concurrent seat reservations under load.
+A distributed ticket booking system built to handle concurrent seat reservations reliably — preventing double-booking while remaining correct under payment failures and service outages.
+
+This is a portfolio project. The goal was to design the system first (data model, state machine, failure modes), then hand the design off to an AI agent to implement, and evaluate both the design quality and the agent's ability to execute it faithfully.
 
 ## What This Demonstrates
 
-- **Redis distributed locking** — atomic seat reservation with `SET NX` preventing double-booking
-- **Idempotency** — duplicate booking requests are safe; duplicate payment webhooks are safe
-- **Outbox pattern** — refund requests survive transient payment service failures via at-least-once delivery
-- **Derived state** — `rejected` status is never written to the DB; computed at read time from `created_at`
-- **Dual confirmation** — webhook + BullMQ delayed job fallback ensure payment is always reconciled
+| Concern | Pattern Used |
+|---|---|
+| Concurrent seat reservation | Redis distributed lock (`SET NX`) |
+| Duplicate booking requests | Idempotency key on `(eventID, seatID, userID)` |
+| Duplicate payment webhooks | First-write-wins on `paymentSessionID` |
+| Refunds under payment outage | Transactional outbox with at-least-once delivery |
+| Payment reconciliation | Webhook + BullMQ delayed job fallback |
+| Derived state | `rejected` status computed at read time, never stored |
+
+## System Design
+
+This is the initial design diagram created before implementation — the starting point handed to the agent.
+
+![System Design](assets/system-design.png)
+
+### Booking Flow
+
+1. API acquires a Redis lock (`lock:{eventID}:{seatID}`, 32-minute TTL) — returns `409` if already held
+2. Booking is written with status `pending`; a BullMQ job is scheduled for minute 30
+3. Payment session is created; `paymentSessionID` is stored on the booking
+4. User completes payment on the frontend
+5. Payment service fires a webhook; booking service confirms the seat atomically
+6. BullMQ job at minute 30 acts as fallback if webhook was never received
+
+### State Machine
+
+```
+pending ──► success   (payment confirmed, seat won the conflict check)
+pending ──► rejected  (derived: createdAt + 30min < now AND still pending)
+```
+
+`rejected` is never written to the database. It is computed at read time from `createdAt`. This avoids a whole class of race conditions around state transitions.
+
+### Seat Confirmation Transaction (step 5/6)
+
+When marking a booking as success, atomically:
+1. Check if a newer booking exists for the same `eventID + seatID` (lock may have expired and re-acquired)
+2. If conflict: do **not** mark success — write a refund request to the `outbox` table instead
+3. Otherwise: mark `success`
+
+Steps 2 and 3 happen in a single transaction so no refund can be lost even if the process crashes mid-flight.
+
+### Outbox Pattern
+
+Refund requests are written to an `outbox` table in the **same transaction** as step 5/6. A background worker polls the outbox and delivers to the payment service with retries. The payment service's refund handler is idempotent on `paymentSessionID`, so retries are safe.
 
 ## Architecture
 
 | Service | Technology | Role |
 |---|---|---|
-| API | Node.js + Express | Booking creation, webhook handling |
+| API | Node.js + Express (TypeScript) | Booking creation, webhook handling |
 | Database | PostgreSQL 16 | Bookings, outbox, events, seats |
 | Cache / Locks | Redis 7 | Distributed seat locks via `SET NX` |
-| Job Queue | BullMQ | Delayed payment check job at minute 30 |
-| Payment | Mock HTTP service | Session creation, refunds, webhook callbacks |
-| Workers | Node.js | Outbox processor, BullMQ job runner |
+| Job Queue | BullMQ | Delayed payment check at minute 30 |
+| Payment | Mock HTTP service (TypeScript) | Session creation, refunds, webhook callbacks |
+| Workers | Node.js (TypeScript) | Outbox processor, BullMQ job runner |
+
+## Data Model
+
+```
+Event       { id, name, host, date, venueID }
+Venue       { id, name, address }
+Seat        { id, venueID, label }
+Booking     { id, eventID, seatID, userID, createdAt, status, paymentSessionID }
+              status ∈ { 'pending', 'success' }  — 'rejected' is derived, never stored
+              unique on (event_id, seat_id, user_id)
+Outbox      { id, type, payload, createdAt, processedAt }
+              type = 'refund', processedAt NULL = unprocessed
+```
 
 ## Running the App
 
@@ -27,8 +82,8 @@ A distributed ticket booking system demonstrating production-grade patterns for 
 docker compose up --build
 ```
 
-- API: http://localhost:3000
-- Mock payment service: http://localhost:4000
+- API: `http://localhost:3000`
+- Mock payment service: `http://localhost:4000`
 
 ## API Reference
 
@@ -58,42 +113,53 @@ Errors:
 - `409` — seat already locked (another booking in progress)
 - `503` — payment service unavailable
 
-## Load Test + Chaos Monkey
+## Unit Tests
 
-The load test suite exercises the system's correctness invariants under concurrent load and injected failures.
-
-### Run the Load Test
+33 Jest tests covering the core service layer (ts-jest).
 
 ```bash
-# Option A: start app + run load test in one command
+npm test
+```
+
+| Suite | What's Tested |
+|---|---|
+| `lockService` | Acquire, release, check — Redis mock |
+| `paymentClient` | Session creation, refund, 503 handling |
+| `bookingService` | `deriveStatus`, idempotent webhook, atomic confirmation, outbox refund path |
+
+## Load Test + Chaos Monkey
+
+The load test suite verifies correctness invariants under concurrent load and injected failures.
+
+```bash
+# Start app + run load test in one command
 docker compose --profile load-test up --build
 
-# Option B: app already running, run test once interactively
-docker compose up -d --build
+# App already running — run test once
 docker compose --profile load-test run --rm load-test
 
-# Option C: run directly (app already running locally)
+# Run directly against a locally running app
 npm run load-test
 ```
 
-The load-test container exits with code `0` (all pass) or `1` (any failure). All app services keep running.
+The load-test container exits `0` (all pass) or `1` (any failure).
 
 ### Scenarios
 
-| Scenario | Description | Key Assertion |
+| Scenario | Description | Assertion |
 |---|---|---|
 | **Baseline** | 50 users book 50 different seats concurrently | All 50 return 201, no double bookings |
 | **Seat Contention** | 30 users race for 1 seat | Exactly 1 wins (201), 29 get 409 |
-| **Payment Chaos** | Wave 1 (10 seats) succeeds; chaos mode `down`; wave 2 (10 seats) fires | Wave 2 all get 503; wave 1 seats confirmed |
-| **Webhook Idempotency** | Webhook fires once + 2 manual duplicates sent directly | Duplicates return 200 (idempotent accept); booking has exactly 1 success row |
-| **Chaos Mix** | 5 users per seat × 3 seats, payment `slow` | 3 winners, refunds in outbox, all processed |
+| **Payment Chaos** | Wave 1 succeeds; chaos `down`; wave 2 fires | Wave 2 all get 503; wave 1 confirmed |
+| **Webhook Idempotency** | Webhook fires + 2 manual duplicates sent | Duplicates return 200; exactly 1 success row |
+| **Chaos Mix** | 5 users × 3 seats, payment `slow` | 3 winners, refunds in outbox, all processed |
 
-### Correctness Invariants Verified
+### Correctness Invariants
 
 - No seat has more than one `success` booking
-- No `rejected` status is ever written to the database
-- All pending+non-expired bookings have a corresponding Redis lock
-- All displaced bookings (lost the seat race) have an outbox refund entry
+- `rejected` is never written to the database
+- All pending non-expired bookings have a corresponding Redis lock
+- All displaced bookings have an outbox refund entry
 - All outbox entries are eventually processed
 
 ### Chaos Modes
@@ -118,17 +184,4 @@ The mock payment service exposes chaos control endpoints used by the test runner
 | `LOCK_TTL_SECONDS` | `1920` | Redis lock TTL (32 min = 30 min window + 2 min buffer) |
 | `PORT` | `3000` | API server port |
 
-> The load-test container sets `BOOKING_WINDOW_MINUTES=2` so scenarios that test expiry don't need to wait 30 minutes.
-
-## Data Model
-
-```
-Event       { id, name, host, date, venueID }
-Venue       { id, name, address }
-Seat        { id, venueID, label }
-Booking     { id, eventID, seatID, userID, createdAt, status, paymentSessionID }
-              status ∈ { 'pending', 'success' }  — 'rejected' is derived, never stored
-              unique on (event_id, seat_id, user_id)
-Outbox      { id, type, payload, createdAt, processedAt }
-              type = 'refund', processedAt NULL = unprocessed
-```
+> The load-test container sets `BOOKING_WINDOW_MINUTES=2` so expiry scenarios don't need to wait 30 minutes.
